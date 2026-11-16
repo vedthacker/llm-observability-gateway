@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llmscope dashboard</title>
+<style>
+  :root { --bg:#f7f8fa; --panel:#fff; --ink:#15181e; --muted:#667085; --line:#e4e7ec; --accent:#2f6fed; --good:#12805c; --warn:#b54708; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --panel:#171a21; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f3a; --accent:#6b9bff; --good:#3ccf9a; --warn:#f0a35c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 48px; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  h1 { font-size:20px; margin:0; } h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px; font-weight:600; }
+  .sub { color:var(--muted); font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .tile, .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .tile .k { color:var(--muted); font-size:12px; } .tile .v { font-size:22px; font-weight:650; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .tile .s { color:var(--muted); font-size:12px; }
+  .row { display:grid; grid-template-columns:1.4fr 1fr; gap:10px; margin-bottom:14px; } @media (max-width:760px){ .row{grid-template-columns:1fr;} }
+  table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+  th { text-align:left; color:var(--muted); font-weight:600; border-bottom:1px solid var(--line); padding:6px 8px; white-space:nowrap; }
+  td { padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .scroll { overflow-x:auto; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+  .pill.exact,.pill.semantic { color:var(--good); border-color:var(--good); } .pill.miss { color:var(--muted); } .pill.bad { color:var(--warn); border-color:var(--warn); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; } button:disabled{opacity:.5;}
+  svg text { fill:var(--muted); font-size:10px; } .bar { fill:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>llmscope</h1><div class="sub" id="status">connecting…</div></div>
+    <button id="traffic">Send 12 sample requests</button>
+  </header>
+  <div class="grid" id="tiles"></div>
+  <div class="row">
+    <div class="panel"><h2>Latency distribution (ms)</h2><svg id="hist" viewBox="0 0 600 170" width="100%" role="img" aria-label="latency histogram"></svg></div>
+    <div class="panel"><h2>By model</h2><div class="scroll"><table id="models"></table></div></div>
+  </div>
+  <div class="panel"><h2>Recent requests</h2><div class="scroll"><table id="recent"></table></div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d=0) => v == null ? "–" : Number(v).toLocaleString(undefined, {maximumFractionDigits:d});
+const usd = v => v == null ? "–" : "$" + Number(v).toFixed(v < 0.01 ? 5 : 4);
+
+function tile(k, v, s="") { return `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`; }
+
+async function refresh() {
+  try {
+    const [m, r] = await Promise.all([fetch("/metrics").then(x => x.json()), fetch("/requests?limit=12").then(x => x.json())]);
+    $("status").textContent = `${m.requests} requests · ${m.errors} errors · ${m.rejected} rejected · updated ${new Date().toLocaleTimeString()}`;
+    $("tiles").innerHTML =
+      tile("Cache hit rate", fmt(m.cache_hit_rate * 100, 1) + "%", `${m.cache_exact} exact · ${m.cache_semantic} semantic`) +
+      tile("Latency p50 / p95", `${fmt(m.latency_ms.p50)} / ${fmt(m.latency_ms.p95)} ms`) +
+      tile("TTFT p50 / p95", `${fmt(m.ttft_ms.p50)} / ${fmt(m.ttft_ms.p95)} ms`, "model calls only") +
+      tile("Decode speed", `${fmt(m.tokens_per_sec.p50, 1)} tok/s`, "p50, excludes TTFT") +
+      tile("Cost", usd(m.cost_usd), `${usd(m.avg_cost_per_request_usd)} / request`) +
+      tile("Saved", usd(m.cost_saved_usd), `${fmt(m.tokens_saved)} tokens avoided`) +
+      tile("Gateway overhead", `${fmt(m.gateway_overhead_ms.p95, 2)} ms`, "p95, real CPU time");
+    const h = m.latency_histogram, max = Math.max(1, ...h.map(b => b.count)), w = 600 / Math.max(1, h.length);
+    $("hist").innerHTML = h.map((b, i) => { const bh = 130 * b.count / max;
+      return `<rect class="bar" x="${i*w+3}" y="${140-bh}" width="${w-6}" height="${bh}" rx="2"><title>${b.from_ms}-${b.to_ms} ms: ${b.count}</title></rect>` +
+             `<text x="${i*w+w/2}" y="156" text-anchor="middle">${b.from_ms}</text>` +
+             (b.count ? `<text x="${i*w+w/2}" y="${134-bh}" text-anchor="middle">${b.count}</text>` : ""); }).join("");
+    $("models").innerHTML = "<tr><th>model</th><th>requests</th><th>cost</th><th>out tokens</th></tr>" +
+      Object.entries(m.by_model).map(([k, v]) => `<tr><td>${k}</td><td>${v.requests}</td><td>${usd(v.cost_usd)}</td><td>${fmt(v.output_tokens)}</td></tr>`).join("");
+    $("recent").innerHTML = "<tr><th>tenant</th><th>model</th><th>status</th><th>cache</th><th>in</th><th>out</th><th>TTFT</th><th>latency</th><th>tok/s</th><th>cost</th><th>trace</th></tr>" +
+      r.map(x => `<tr><td>${x.tenant}</td><td>${x.model}</td><td><span class="pill ${x.status === "ok" ? "" : "bad"}">${x.status}</span></td>` +
+        `<td><span class="pill ${x.cache}">${x.cache}</span></td><td>${x.input_tokens}</td><td>${x.output_tokens}</td><td>${fmt(x.ttft_ms)}</td>` +
+        `<td>${fmt(x.latency_ms)}</td><td>${fmt(x.tokens_per_sec, 1)}</td><td>${usd(x.cost_usd)}</td><td><a href="/traces/${x.trace_id}?tree=true" target="_blank">${x.trace_id.slice(0,8)}</a></td></tr>`).join("");
+  } catch (e) { $("status").textContent = "cannot reach /metrics: " + e; }
+}
+
+const SAMPLE = ["What is the refund window?", "what is the refund window", "How do I rotate service account keys?",
+  "Explain the SEV1 escalation policy.", "What is the rate limit for the Business tier?", "What is the rate limit for the Enterprise tier?"];
+$("traffic").onclick = async () => {
+  $("traffic").disabled = true;
+  for (let i = 0; i < 12; i++) {
+    await fetch("/v1/chat", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({tenant: i % 3 ? "acme" : "globex", model: i % 4 ? "mock-fast" : "mock-large",
+                            messages:[{role:"user", content: SAMPLE[i % SAMPLE.length]}]})}).catch(() => {});
+  }
+  $("traffic").disabled = false; refresh();
+};
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>
