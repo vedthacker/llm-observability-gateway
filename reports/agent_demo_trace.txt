@@ -1,0 +1,15 @@
+agent.run                       7122.8 ms  ok    
+  agent.plan                    5867.3 ms  ok    
+    gateway.chat                5867.3 ms  ok    {'model': 'mock-large', 'cache': 'miss', 'input_tokens': 18, 'output_tokens': 242, 'cost_usd': 0.002442, 'ttft_ms': 578.4087181091309}
+      cache.lookup                 0.0 ms  ok    {'cache': 'miss'}
+      llm.call                  5867.3 ms  ok    {'model': 'mock-large', 'input_tokens': 18, 'output_tokens': 242, 'ttft_ms': 578.4}
+  agent.tool                      40.0 ms  ok    
+  agent.answer                  1215.5 ms  ok    
+    gateway.chat                1215.5 ms  ok    {'model': 'mock-fast', 'cache': 'miss', 'input_tokens': 65, 'output_tokens': 121, 'cost_usd': 0.000322, 'ttft_ms': 240.51785469055176}
+      cache.lookup                 0.0 ms  ok    {'cache': 'miss'}
+      llm.call                  1215.5 ms  ok    {'model': 'mock-fast', 'input_tokens': 65, 'output_tokens': 121, 'ttft_ms': 240.5}
+  agent.answer.retry-from-cache       0.0 ms  ok    
+    gateway.chat                   0.0 ms  ok    {'model': 'mock-fast', 'cache': 'exact', 'input_tokens': 65, 'output_tokens': 121, 'cost_usd': 0.0, 'ttft_ms': None}
+      cache.lookup                 0.0 ms  ok    {'cache': 'exact'}
+
+requests=3  cache_hit_rate=33%  cost=$0.002764  saved=$0.000322
